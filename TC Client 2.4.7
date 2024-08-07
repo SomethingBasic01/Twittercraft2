@@ -1,0 +1,524 @@
+-- client.lua
+local serverId = 1
+local port = 1234
+
+-- Utility functions for UI
+local function drawBox(x, y, width, height, color)
+    term.setBackgroundColor(color)
+    for i = 0, height - 1 do
+        term.setCursorPos(x, y + i)
+        term.write(string.rep(" ", width))
+    end
+    term.setBackgroundColor(colors.white)
+end
+
+local function drawButton(x, y, width, label, buttonColor, textColor)
+    term.setCursorPos(x, y)
+    term.setBackgroundColor(buttonColor)
+    term.setTextColor(textColor)
+    term.write(string.rep(" ", width))
+    term.setCursorPos(x + math.floor((width - #label) / 2), y)
+    term.write(label)
+    term.setBackgroundColor(colors.white)
+end
+
+local function inputBox(x, y, width, label, password)
+    term.setCursorPos(x, y)
+    term.setTextColor(colors.black)
+    term.write(label .. ": ")
+    term.setBackgroundColor(colors.lightGray)
+    term.setTextColor(colors.black)
+    term.setCursorPos(x + #label + 2, y)
+    local input = read(password)
+    term.setBackgroundColor(colors.white)
+    return input
+end
+
+local function centerText(y, text)
+    local width, _ = term.getSize()
+    term.setCursorPos(math.floor((width - #text) / 2), y)
+    term.write(text)
+end
+
+local function isClickWithin(x, y, width, height, clickX, clickY)
+    return clickX >= x and clickX <= x + width - 1 and clickY >= y and clickY <= y + height - 1
+end
+
+local function sendRequest(request)
+    rednet.open("back")
+    rednet.send(serverId, textutils.serialize(request))
+    local senderId, response = rednet.receive(port)
+    rednet.close()
+    return response
+end
+
+local function fileBrowser()
+    local currentDir = "/"
+    while true do
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.write("Current Directory: " .. currentDir)
+
+        local files = fs.list(currentDir)
+        local y = 4
+
+        for i, file in ipairs(files) do
+            if fs.isDir(currentDir .. file) then
+                term.setTextColor(colors.cyan)
+            else
+                term.setTextColor(colors.black)
+            end
+            term.setCursorPos(2, y)
+            term.write(file)
+            y = y + 1
+        end
+
+        local event, button, x, y = os.pullEvent("mouse_click")
+        local selectedFile = files[y - 4]
+        if selectedFile then
+            if fs.isDir(currentDir .. selectedFile) then
+                currentDir = currentDir .. selectedFile .. "/"
+            else
+                return currentDir .. selectedFile
+            end
+        end
+    end
+end
+
+local function createUser()
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    local width, height = term.getSize()
+    local username = ""
+    local password = ""
+    local bio = ""
+    local profilePicture = ""
+
+    while true do
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        centerText(2, "Create a New Profile")
+
+        username = inputBox((width - 30) / 2, 4, 20, "Username")
+        password = inputBox((width - 30) / 2, 6, 20, "Password")
+        bio = inputBox((width - 30) / 2, 8, 20, "Bio")
+
+        centerText(10, "Choose profile picture option:")
+        drawButton((width - 30) / 2, 12, 30, "1. Upload existing paint file", colors.gray, colors.black)
+        drawButton((width - 30) / 2, 14, 30, "2. Create new profile picture", colors.gray, colors.black)
+        drawButton((width - 30) / 2, 16, 30, "3. Return to Menu", colors.gray, colors.black)
+
+        local event, button, x, y = os.pullEvent("mouse_click")
+        if isClickWithin((width - 30) / 2, 12, 30, 1, x, y) then
+            profilePicture = fileBrowser()
+            if profilePicture and profilePicture ~= "" and fs.exists(profilePicture) then
+                local file = fs.open(profilePicture, "r")
+                local pictureData = file.readAll()
+                file.close()
+                local request = {type = "createUser", username = username, password = password, bio = bio, profilePicture = profilePicture, pictureData = pictureData}
+                local response = sendRequest(request)
+                if response == "Profile created successfully" then
+                    term.setCursorPos((width - 30) / 2, 18)
+                    term.setTextColor(colors.green)
+                    term.write("Profile creation successful")
+                    term.setTextColor(colors.black)
+                    sleep(2)
+                    return
+                else
+                    term.setCursorPos((width - 30) / 2, 18)
+                    term.setTextColor(colors.red)
+                    term.write("Profile creation failed: " .. response)
+                    term.setTextColor(colors.black)
+                    sleep(2)
+                end
+            else
+                term.setCursorPos((width - 30) / 2, 18)
+                term.setTextColor(colors.red)
+                term.write("Invalid profile picture path")
+                term.setTextColor(colors.black)
+                sleep(2)
+            end
+        elseif isClickWithin((width - 30) / 2, 14, 30, 1, x, y) then
+            shell.run("paint profilePicture.nfp")
+            profilePicture = "profilePicture.nfp"
+            if profilePicture and profilePicture ~= "" and fs.exists(profilePicture) then
+                local file = fs.open(profilePicture, "r")
+                local pictureData = file.readAll()
+                file.close()
+                local request = {type = "createUser", username = username, password = password, bio = bio, profilePicture = profilePicture, pictureData = pictureData}
+                local response = sendRequest(request)
+                if response == "Profile created successfully" then
+                    term.setCursorPos((width - 30) / 2, 18)
+                    term.setTextColor(colors.green)
+                    term.write("Profile creation successful")
+                    term.setTextColor(colors.black)
+                    sleep(2)
+                    return
+                else
+                    term.setCursorPos((width - 30) / 2, 18)
+                    term.setTextColor(colors.red)
+                    term.write("Profile creation failed: " .. response)
+                    term.setTextColor(colors.black)
+                    sleep(2)
+                end
+            else
+                term.setCursorPos((width - 30) / 2, 18)
+                term.setTextColor(colors.red)
+                term.write("Invalid profile picture path")
+                term.setTextColor(colors.black)
+                sleep(2)
+            end
+        elseif isClickWithin((width - 30) / 2, 16, 30, 1, x, y) then
+            return
+        end
+    end
+end
+
+local function showProfile(username)
+    local request = {type = "showProfile", username = username}
+    local response = sendRequest(request)
+    local profile = textutils.unserialize(response)
+    if type(profile) == "table" then
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        term.write("Username: " .. username)
+        term.setCursorPos(2, 4)
+        term.write("Bio: " .. (profile.bio or ""))
+        term.setCursorPos(2, 6)
+        term.write("Profile Picture:")
+        if fs.exists(profile.profilePicture) then
+            shell.run("paint", profile.profilePicture)
+        else
+            term.setCursorPos(2, 7)
+            term.write("No profile picture found.")
+        end
+        term.setCursorPos(2, 9)
+        term.write("Followers: " .. #profile.followers)
+        term.setCursorPos(2, 11)
+        term.write("Following: " .. #profile.following)
+        drawButton(2, 13, 20, "Return to Menu", colors.gray, colors.black)
+        while true do
+            local event, button, x, y = os.pullEvent("mouse_click")
+            if isClickWithin(2, 13, 20, 1, x, y) then
+                return
+            end
+        end
+    else
+        print(response)
+    end
+end
+
+local function updateProfile(username)
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    term.setCursorPos(2, 2)
+    term.setTextColor(colors.black)
+    term.write("Enter new bio:")
+    local bio = read()
+    term.setCursorPos(2, 3)
+    term.write("Choose profile picture option:")
+    term.setCursorPos(2, 4)
+    term.write("1. Upload existing paint file")
+    term.setCursorPos(2, 5)
+    term.write("2. Create new profile picture")
+    local choice = read()
+    local profilePicture
+
+        if choice == "1" then
+        profilePicture = fileBrowser()
+        if profilePicture and profilePicture ~= "" and fs.exists(profilePicture) then
+            local file = fs.open(profilePicture, "r")
+            local pictureData = file.readAll()
+            file.close()
+            local request = {type = "updateProfile", username = username, bio = bio, profilePicture = profilePicture, pictureData = pictureData}
+            print(sendRequest(request))
+        else
+            print("Invalid profile picture path")
+        end
+    elseif choice == "2" then
+        shell.run("paint profilePicture.nfp")
+        profilePicture = "profilePicture.nfp"
+        if profilePicture and profilePicture ~= "" and fs.exists(profilePicture) then
+            local file = fs.open(profilePicture, "r")
+            local pictureData = file.readAll()
+            file.close()
+            local request = {type = "updateProfile", username = username, bio = bio, profilePicture = profilePicture, pictureData = pictureData}
+            print(sendRequest(request))
+        else
+            print("Invalid profile picture path")
+        end
+    end
+end
+
+local function tweet(username)
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    term.setCursorPos(2, 2)
+    term.setTextColor(colors.black)
+    term.write("Enter tweet:")
+    local message = read()
+    local request = {type = "tweet", username = username, message = message}
+    print(sendRequest(request))
+end
+
+local function followUser(username)
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    term.setCursorPos(2, 2)
+    term.setTextColor(colors.black)
+    term.write("Enter the username of the person to follow:")
+    local followee = read()
+    local request = {type = "followUser", follower = username, followee = followee}
+    print(sendRequest(request))
+end
+
+local function unfollowUser(username)
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    term.setCursorPos(2, 2)
+    term.setTextColor(colors.black)
+    term.write("Enter the username of the person to unfollow:")
+    local followee = read()
+    local request = {type = "unfollowUser", follower = username, followee = followee}
+    print(sendRequest(request))
+end
+
+local function viewTweets(username)
+    local request = {type = "viewTweets", username = username}
+    local response = sendRequest(request)
+    local tweets = textutils.unserialize(response)
+    if type(tweets) == "table" then
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        if #tweets == 0 then
+            term.setCursorPos(2, 2)
+            term.write("No tweets found.")
+        else
+            for i, tweet in ipairs(tweets) do
+                term.setCursorPos(2, 2 + (i * 2))
+                term.write(tweet.time .. " - " .. tweet.user .. ": " .. tweet.message)
+            end
+        end
+        drawButton(2, 16, 20, "Return to Menu", colors.gray, colors.black)
+        while true do
+            local event, button, x, y = os.pullEvent("mouse_click")
+            if isClickWithin(2, 16, 20, 1, x, y) then
+                return
+            end
+        end
+    else
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        term.write("Error retrieving tweets.")
+        sleep(2)
+    end
+end
+
+local function showFollowers(username)
+    local request = {type = "showFollowers", username = username}
+    local response = sendRequest(request)
+    local followers = textutils.unserialize(response)
+    if type(followers) == "table" then
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        if #followers == 0 then
+            term.write("No followers found.")
+        else
+            for i, follower in ipairs(followers) do
+                term.write(follower)
+                term.setCursorPos(2, 3 + i)
+            end
+        end
+        drawButton(2, 16, 20, "Return to Menu", colors.gray, colors.black)
+        while true do
+            local event, button, x, y = os.pullEvent("mouse_click")
+            if isClickWithin(2, 16, 20, 1, x, y) then
+                return
+            end
+        end
+    else
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        term.write("Error retrieving followers.")
+        sleep(2)
+    end
+end
+
+local function showFollowing(username)
+    local request = {type = "showFollowing", username = username}
+    local response = sendRequest(request)
+    local following = textutils.unserialize(response)
+    if type(following) == "table" then
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        if #following == 0 then
+            term.write("Not following anyone.")
+        else
+            for i, followee in ipairs(following) do
+                term.write(followee .. " [X]")
+                term.setCursorPos(2, 3 + i)
+            end
+        end
+        drawButton(2, 16, 20, "Return to Menu", colors.gray, colors.black)
+        while true do
+            local event, button, x, y = os.pullEvent("mouse_click")
+            if isClickWithin(2, 16, 20, 1, x, y) then
+                return
+            else
+                for i, followee in ipairs(following) do
+                    if isClickWithin(2 + #followee + 1, 2 + i, 3, 1, x, y) then
+                        local request = {type = "unfollowUser", follower = username, followee = followee}
+                        sendRequest(request)
+                        return
+                    end
+                end
+            end
+        end
+    else
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.blue)
+        term.setCursorPos(2, 2)
+        term.setTextColor(colors.black)
+        term.write("Error retrieving following.")
+        sleep(2)
+    end
+end
+
+local function settingsMenu(username)
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    centerText(2, "Settings:")
+    drawButton(2, 4, 20, "Change Username", colors.gray, colors.black)
+    drawButton(2, 6, 20, "Change Password", colors.gray, colors.black)
+    drawButton(2, 8, 20, "Change Bio", colors.gray, colors.black)
+    drawButton(2, 10, 20, "Change Profile Picture", colors.gray, colors.black)
+    drawButton(2, 12, 20, "Return to Menu", colors.gray, colors.black)
+
+    while true do
+        local event, button, x, y = os.pullEvent("mouse_click")
+        if isClickWithin(2, 4, 20, 1, x, y) then
+            term.clear()
+            drawBox(1, 1, 51, 19, colors.blue)
+            term.setCursorPos(2, 2)
+            term.setTextColor(colors.black)
+            term.write("Enter new username:")
+            local newUsername = read()
+            local request = {type = "updateUsername", oldUsername = username, newUsername = newUsername}
+            print(sendRequest(request))
+            username = newUsername
+        elseif isClickWithin(2, 6, 20, 1, x, y) then
+            term.clear()
+            drawBox(1, 1, 51, 19, colors.blue)
+            term.setCursorPos(2, 2)
+            term.setTextColor(colors.black)
+            term.write("Enter new password:")
+            local newPassword = read()
+            local request = {type = "updatePassword", username = username, newPassword = newPassword}
+            print(sendRequest(request))
+        elseif isClickWithin(2, 8, 20, 1, x, y) then
+            term.clear()
+            drawBox(1, 1, 51, 19, colors.blue)
+            term.setCursorPos(2, 2)
+            term.setTextColor(colors.black)
+            term.write("Enter new bio:")
+            local newBio = read()
+            local request = {type = "updateBio", username = username, newBio = newBio}
+            print(sendRequest(request))
+        elseif isClickWithin(2, 10, 20, 1, x, y) then
+            shell.run("paint profilePicture.nfp")
+            local profilePicture = "profilePicture.nfp"
+            if profilePicture and profilePicture ~= "" and fs.exists(profilePicture) then
+                local file = fs.open(profilePicture, "r")
+                local pictureData = file.readAll()
+                file.close()
+                local request = {type = "updateProfile", username = username, bio = "", profilePicture = profilePicture, pictureData = pictureData}
+                print(sendRequest(request))
+            else
+                print("Invalid profile picture path")
+            end
+        elseif isClickWithin(2, 12, 20, 1, x, y) then
+            return
+        end
+    end
+end
+
+local function mainMenu(username)
+    while true do
+        term.clear()
+        drawBox(1, 1, 51, 19, colors.white)
+        drawButton(2, 2, 20, "Home", colors.gray, colors.black)
+        drawButton(2, 4, 20, "Explore", colors.gray, colors.black)
+        drawButton(2, 6, 20, "Messages", colors.gray, colors.black)
+        drawButton(2, 8, 20, "Settings", colors.gray, colors.black)
+        drawButton(2, 10, 20, "Profile", colors.gray, colors.black)
+        drawButton(2, 12, 20, "Followers: " .. #users[username].followers, colors.gray, colors.black)
+        drawButton(2, 14, 20, "Following: " .. #users[username].following, colors.gray, colors.black)
+        term.setCursorPos(2, 16)
+        term.setTextColor(colors.black)
+        term.write(users[username].bio or "")
+        while true do
+            local event, button, x, y = os.pullEvent("mouse_click")
+            if isClickWithin(2, 2, 20, 1, x, y) then
+                viewTweets(username)
+            elseif isClickWithin(2, 4, 20, 1, x, y) then
+                -- Placeholder for Explore function
+            elseif isClickWithin(2, 6, 20, 1, x, y) then
+                -- Placeholder for Messages function
+            elseif isClickWithin(2, 8, 20, 1, x, y) then
+                settingsMenu(username)
+            elseif isClickWithin(2, 10, 20, 1, x, y) then
+                showProfile(username)
+            elseif isClickWithin(2, 12, 20, 1, x, y) then
+                showFollowers(username)
+            elseif isClickWithin(2, 14, 20, 1, x, y) then
+                showFollowing(username)
+            end
+        end
+    end
+end
+
+local function login()
+    term.clear()
+    drawBox(1, 1, 51, 19, colors.blue)
+    local width, height = term.getSize()
+    centerText(2, "Welcome to Twitter!")
+    centerText(3, "Please log in or create a new account.")
+    drawButton((width - 20) / 2, 7, 20, "Log In", colors.gray, colors.black)
+    drawButton((width - 20) / 2, 9, 20, "Create Account", colors.gray, colors.black)
+
+    while true do
+        local event, button, x, y = os.pullEvent("mouse_click")
+        if isClickWithin((width - 20) / 2, 7, 20, 1, x, y) then
+            term.clear()
+            drawBox(1, 1, 51, 19, colors.blue)
+            local username = inputBox((width - 20) / 2, 10, 20, "Username")
+            local password = inputBox((width - 20) / 2, 12, 20, "Password", true)
+            local request = {type = "login", username = username, password = password}
+            local response = sendRequest(request)
+            if response == "Login successful" then
+                mainMenu(username)
+            else
+                term.setCursorPos((width - #response) / 2, 15)
+                term.write(response)
+                sleep(2)
+            end
+        elseif isClickWithin((width - 20) / 2, 9, 20, 1, x, y) then
+            createUser()
+        end
+    end
+end
+
+login()
