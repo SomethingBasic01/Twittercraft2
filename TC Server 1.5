@@ -1,0 +1,249 @@
+-- server.lua
+local port = 1234
+local users = {}
+
+local function simpleHash(str)
+    local hash = 0
+    for i = 1, #str do
+        hash = (hash + string.byte(str, i) * i) % 65535
+    end
+    return tostring(hash)
+end
+
+local function loadUsers()
+    if fs.exists("users.txt") then
+        local success, err = pcall(function()
+            local file = fs.open("users.txt", "r")
+            users = textutils.unserialize(file.readAll())
+            file.close()
+        end)
+        if not success then
+            print("Error loading users: " .. err)
+        end
+    else
+        print("No users.txt file found. Starting with empty user list.")
+    end
+end
+
+local function saveUsers()
+    local success, err = pcall(function()
+        local file = fs.open("users.txt", "w")
+        file.write(textutils.serialize(users))
+        file.close()
+    end)
+    if not success then
+        print("Error saving users: " .. err)
+    end
+end
+
+local function createUser(request)
+    if users[request.username] then
+        return "Username already exists"
+    elseif not request.pictureData then
+        return "Invalid profile picture data"
+    else
+        local profilePicturePath = "profiles/" .. request.username .. ".nfp"
+        local file = fs.open(profilePicturePath, "w")
+        file.write(request.pictureData)
+        file.close()
+
+        users[request.username] = {
+            password = simpleHash(request.password),
+            bio = request.bio,
+            profilePicture = profilePicturePath,
+            followers = 0,
+            following = 0,
+            tweets = {},
+            followersList = {},
+            followingList = {}
+        }
+        saveUsers()
+        return "Profile created successfully"
+    end
+end
+
+local function login(request)
+    local user = users[request.username]
+    if user and user.password == simpleHash(request.password) then
+        return "Login successful"
+    else
+        return "Invalid username or password"
+    end
+end
+
+local function showProfile(request)
+    local user = users[request.username]
+    if user then
+        local profile = {
+            bio = user.bio,
+            followers = user.followers,
+            following = user.following,
+            profilePicture = user.profilePicture
+        }
+        return textutils.serialize(profile)
+    else
+        return "Profile not found"
+    end
+end
+
+local function updateProfile(request)
+    local user = users[request.username]
+    if user then
+        user.bio = request.bio
+        local profilePicturePath = "profiles/" .. request.username .. ".nfp"
+        local file = fs.open(profilePicturePath, "w")
+        file.write(request.pictureData)
+        file.close()
+        user.profilePicture = profilePicturePath
+        saveUsers()
+        return "Profile updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+local function tweet(request)
+    local user = users[request.username]
+    if user then
+        table.insert(user.tweets, {time = os.date("%Y-%m-%d %H:%M:%S"), user = request.username, message = request.message})
+        saveUsers()
+        return "Tweet successful"
+    else
+        return "Profile not found"
+    end
+end
+
+local function followUser(request)
+    local user = users[request.follower]
+    local followee = users[request.followee]
+    if user and followee then
+        if not user.followingList then
+            user.followingList = {}
+        end
+        if not followee.followersList then
+            followee.followersList = {}
+        end
+        followee.followers = followee.followers + 1
+        user.following = user.following + 1
+        table.insert(user.followingList, request.followee)
+        table.insert(followee.followersList, request.follower)
+        saveUsers()
+        return "Follow successful"
+    else
+        return "Profile not found"
+    end
+end
+
+local function unfollowUser(request)
+    local user = users[request.follower]
+    local followee = users[request.followee]
+    if user and followee then
+        if not user.followingList then
+            user.followingList = {}
+        end
+        if not followee.followersList then
+            followee.followersList = {}
+        end
+        followee.followers = followee.followers - 1
+        user.following = user.following - 1
+        for i, name in ipairs(user.followingList) do
+            if name == request.followee then
+                table.remove(user.followingList, i)
+                break
+            end
+        end
+        for i, name in ipairs(followee.followersList) do
+            if name == request.follower then
+                table.remove(followee.followersList, i)
+                break
+            end
+        end
+        saveUsers()
+        return "Unfollow successful"
+    else
+        return "Profile not found"
+    end
+end
+
+local function viewTweets(request)
+    local user = users[request.username]
+    if user then
+        local tweets = {}
+        local seenUsers = {}
+
+        local function collectTweets(user)
+            if not seenUsers[user] then
+                seenUsers[user] = true
+                for _, tweet in ipairs(user.tweets) do
+                    table.insert(tweets, tweet)
+                end
+            end
+        end
+
+        collectTweets(user)
+
+        for _, followee in pairs(users) do
+            if followee.followers > 0 then
+                collectTweets(followee)
+            end
+        end
+
+        return textutils.serialize(tweets)
+    else
+        return "Profile not found"
+    end
+end
+
+local function showFollowers(request)
+    local user = users[request.username]
+    if user then
+        return textutils.serialize(user.followersList or {})
+    else
+        return "Profile not found"
+    end
+end
+
+local function showFollowing(request)
+    local user = users[request.username]
+    if user then
+        return textutils.serialize(user.followingList or {})
+    else
+        return "Profile not found"
+    end
+end
+
+rednet.open("back")
+print("Server started on port " .. port)
+loadUsers()
+
+while true do
+    local senderId, message = rednet.receive(port)
+    local request = textutils.unserialize(message)
+    local response = ""
+
+    if request.type == "clientStarted" then
+        response = "Client acknowledged"
+    elseif request.type == "createUser" then
+        response = createUser(request)
+    elseif request.type == "login" then
+        response = login(request)
+    elseif request.type == "showProfile" then
+        response = showProfile(request)
+    elseif request.type == "updateProfile" then
+        response = updateProfile(request)
+    elseif request.type == "tweet" then
+        response = tweet(request)
+    elseif request.type == "followUser" then
+        response = followUser(request)
+    elseif request.type == "unfollowUser" then
+        response = unfollowUser(request)
+    elseif request.type == "viewTweets" then
+        response = viewTweets(request)
+    elseif request.type == "showFollowers" then
+        response = showFollowers(request)
+    elseif request.type == "showFollowing" then
+        response = showFollowing(request)
+    end
+
+    rednet.send(senderId, response)
+end
