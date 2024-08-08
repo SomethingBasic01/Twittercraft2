@@ -1,0 +1,268 @@
+local port = 1234
+local users = {}
+
+local function loadUsers()
+    if fs.exists("users.txt") then
+        local file = fs.open("users.txt", "r")
+        users = textutils.unserialize(file.readAll())
+        file.close()
+    end
+end
+
+local function saveUsers()
+    local file = fs.open("users.txt", "w")
+    file.write(textutils.serialize(users))
+    file.close()
+end
+
+local function createUser(request)
+    if users[request.username] then
+        return "Username already exists"
+    elseif not request.pictureData then
+        return "Invalid profile picture data"
+    else
+        local profilePicturePath = "profiles/" .. request.username .. ".nfp"
+        local file = fs.open(profilePicturePath, "w")
+        file.write(request.pictureData)
+        file.close()
+
+        users[request.username] = {
+            password = request.password,
+            bio = request.bio,
+            profilePicture = profilePicturePath,
+            followers = 0,
+            following = {},
+            tweets = {}
+        }
+        saveUsers()
+        return "Profile created successfully"
+    end
+end
+
+local function login(request)
+    local user = users[request.username]
+    if user and user.password == request.password then
+        return "Login successful"
+    else
+        return "Invalid username or password"
+    end
+end
+
+local function showProfile(request)
+    local user = users[request.username]
+    if user then
+        local followingCount = 0
+        for _ in pairs(user.following) do followingCount = followingCount + 1 end
+        user.followingCount = followingCount -- Add the followingCount to the user data
+        return textutils.serialize(user)
+    else
+        return "Profile not found"
+    end
+end
+
+local function updateProfile(request)
+    local user = users[request.username]
+    if user then
+        user.bio = request.bio
+        local profilePicturePath = "profiles/" .. request.username .. ".nfp"
+        local file = fs.open(profilePicturePath, "w")
+        file.write(request.pictureData)
+        file.close()
+        user.profilePicture = profilePicturePath
+        saveUsers()
+        return "Profile updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+local function tweet(request)
+    local user = users[request.username]
+    if user then
+        table.insert(user.tweets, {time = os.date("%Y-%m-%d %H:%M:%S"), user = request.username, message = request.message})
+        saveUsers()
+        return "Tweet successful"
+    else
+        return "Profile not found"
+    end
+end
+
+local function followUser(request)
+    local user = users[request.follower]
+    local followee = users[request.followee]
+    if user and followee then
+        if not user.following[request.followee] then
+            followee.followers = followee.followers + 1
+            user.following[request.followee] = true
+            saveUsers()
+            return "Follow successful"
+        else
+            return "You are already following this user"
+        end
+    elseif not user then
+        return "Follower profile not found"
+    else
+        return "Followee profile not found"
+    end
+end
+
+local function unfollowUser(request)
+    local user = users[request.follower]
+    local followee = users[request.followee]
+    if user and followee then
+        if user.following[request.followee] then
+            followee.followers = followee.followers - 1
+            user.following[request.followee] = nil
+            saveUsers()
+            return "Unfollow successful"
+        else
+            return "You are not following this user"
+        end
+    elseif not user then
+        return "Follower profile not found"
+    else
+        return "Followee profile not found"
+    end
+end
+
+local function viewTweets(request)
+    local user = users[request.username]
+    if user then
+        local tweets = {}
+        for _, tweet in ipairs(user.tweets) do
+            table.insert(tweets, tweet)
+        end
+        for followeeUsername, _ in pairs(user.following) do
+            local followee = users[followeeUsername]
+            if followee then
+                for _, tweet in ipairs(followee.tweets) do
+                    table.insert(tweets, tweet)
+                end
+            end
+        end
+        return textutils.serialize(tweets)
+    else
+        return "Profile not found"
+    end
+end
+
+local function showFollowers(request)
+    local user = users[request.username]
+    if user then
+        local followers = {}
+        for username, u in pairs(users) do
+            if u.following[request.username] then
+                table.insert(followers, username)
+            end
+        end
+        return textutils.serialize(followers)
+    else
+        return "Profile not found"
+    end
+end
+
+local function showFollowing(request)
+    local user = users[request.username]
+    if user then
+        local following = {}
+        for followeeUsername, _ in pairs(user.following) do
+            table.insert(following, followeeUsername)
+        end
+        return textutils.serialize(following)
+    else
+        return "Profile not found"
+    end
+end
+
+local function updateUsername(request)
+    local user = users[request.username]
+    if user then
+        users[request.newUsername] = user
+        users[request.username] = nil
+        saveUsers()
+        return "Username updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+local function updatePassword(request)
+    local user = users[request.username]
+    if user then
+        user.password = request.newPassword
+        saveUsers()
+        return "Password updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+local function updateBio(request)
+    local user = users[request.username]
+    if user then
+        user.bio = request.newBio
+        saveUsers()
+        return "Bio updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+local function updateProfilePicture(request)
+    local user = users[request.username]
+    if user then
+        local profilePicturePath = "profiles/" .. request.username .. ".nfp"
+        local file = fs.open(profilePicturePath, "w")
+        file.write(request.pictureData)
+        file.close()
+        user.profilePicture = profilePicturePath
+        saveUsers()
+        return "Profile picture updated successfully"
+    else
+        return "Profile not found"
+    end
+end
+
+rednet.open("back")
+print("Server started on port " .. port)
+loadUsers()
+
+while true do
+    local senderId, message = rednet.receive(port)
+    local request = textutils.unserialize(message)
+    local response = ""
+
+    if request.type == "clientStarted" then
+        response = "Client acknowledged"
+    elseif request.type == "createUser" then
+        response = createUser(request)
+    elseif request.type == "login" then
+        response = login(request)
+    elseif request.type == "showProfile" then
+        response = showProfile(request)
+    elseif request.type == "updateProfile" then
+        response = updateProfile(request)
+    elseif request.type == "tweet" then
+        response = tweet(request)
+    elseif request.type == "followUser" then
+        response = followUser(request)
+    elseif request.type == "unfollowUser" then
+        response = unfollowUser(request)
+    elseif request.type == "viewTweets" then
+        response = viewTweets(request)
+    elseif request.type == "showFollowers" then
+        response = showFollowers(request)
+    elseif request.type == "showFollowing" then
+        response = showFollowing(request)
+    elseif request.type == "updateUsername" then
+        response = updateUsername(request)
+    elseif request.type == "updatePassword" then
+        response = updatePassword(request)
+    elseif request.type == "updateBio" then
+        response = updateBio(request)
+    elseif request.type == "updateProfilePicture" then
+        response = updateProfilePicture(request)
+    end
+
+    rednet.send(senderId, response)
+end
